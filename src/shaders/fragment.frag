@@ -128,6 +128,7 @@ vec4 intersect(vec3 ro, vec3 rd){
     vec4 res = vec4(-1.0);
 	vec4 h = vec4(1.0);
     for(int i = 0; i < 200; i++){
+        // dynamic epsilon, aka intersection exit-condition
         float eps = E + E*5.0*pow(float(i)/200.0,2.0);
 		if(h.x < eps || t > 15.0)
             break;
@@ -136,10 +137,13 @@ vec4 intersect(vec3 ro, vec3 rd){
         t += h.x;
     }
 	
+    // signal for no intersection and reached maximum distance
 	return (t >= 15.0 ? vec4(-999) : res);
 }
 
 vec3 calcNormal(vec3 p){
+    // basic central difference with 3 (4) samples
+    // TODO: optimize the central sample away since it's available from callee always anyway
     float c = map(p).x;
     const float e = 0.00001;
     return normalize(vec3(c-map(p-vec3(e,0,0)).x, c-map(p-vec3(0,e,0)).x, c-map(p-vec3(0,0,e)).x));
@@ -169,6 +173,7 @@ vec3 ggx(vec3 rd, vec3 n, float rgh, vec2 rand){
 }
 
 vec3 brdf(in vec3 normal, in vec2 uv, in vec3 rd){
+    // fizzer's strange but nice brdf
 	float theta = pi2 * uv.x;
 	uv.y = 2.0 * uv.y - 1.0;
 	vec3 p = vec3(sqrt(1.0 - uv.y * uv.y) * vec2(cos(theta), sin(theta)), uv.y);
@@ -187,13 +192,13 @@ vec3 brdf(in vec3 normal, in vec2 uv, in vec3 rd){
 
 vec3 colors[6];
 
-vec3 render(vec3 ro, vec3 rd, vec2 uv){
+vec3 render(vec3 ro, vec3 rd){
+
     vec3 color = vec3(0);
-	
     vec3 absorption = vec3(1);
-    
-    const int BOUNCES = 4;
-    for(int b = 0; b < BOUNCES; b++)
+    const int bounces = 4;
+
+    for(int b = 0; b < bounces; b++)
     {
         sd += 1.0;
         vec4 tmat = intersect(ro,rd);
@@ -202,18 +207,27 @@ vec3 render(vec3 ro, vec3 rd, vec2 uv){
             vec3 pos = ro + tmat.x*rd;
             vec3 nor = calcNormal(pos);
             
+            // fake texture coordinates for the metal parts
+            // looks good enough from the camera position
             vec2 metal_coords = cross(nor, normalize(vec3(1,0,2)) ).xy;
+            // get roughness map values
             float rough_map = mix(texture(roughnessTexture, mod(metal_coords*1.21,1.0)).r,
                                   texture(roughnessTexture, mod(metal_coords*0.53,1.0)).r, 0.7);
             rough_map = pow(1.0-rough_map,2.0);
+
+            // incoming light value
             vec3 incoming = colors[int(tmat.y)];
+            // modulate surface color (metal parts) with the roughmess map a bit
             incoming *= 1.0+0.09*(1.0-2.0*rough_map)*step(1.0, tmat.w);
+            // emissive materials
             vec3 emission = tmat.z*incoming;
             
-            
+            // recursive color etc
             color += absorption * emission;
+            // physical attenuation factor
             absorption *= incoming/pi;
             
+            // calculate the brdf with magic formulas
             vec3 rv = reflect(rd, nor);
             float rough1 = 0.01+0.3*texture(roughnessTexture, mod(pos.xz*0.7,1.0)).r;
             rough1 = mix(rough1, 0.4, smoothstep(7.0,9.0,distance(ro,pos)));
@@ -223,11 +237,14 @@ vec3 render(vec3 ro, vec3 rd, vec2 uv){
             vec3 metal  = mix(brdf(nor, R2_seq(iFrame, 0.5, 31.23+sd), rd), ggx(rd, nor, rough2, R2_seq(iFrame, 0.5, -43.531)), step(0.45,hash()));
             vec3 ground = mix(lambert(nor, R2_seq(iFrame, 0.5, 9531.5312+sd)), ggx(rd, nor, rough1, R2_seq(iFrame, 0.5, 86439.3)), step(0.5,hash()));
             rd = mix(ground, metal, tmat.w);
+            // fresnel doesn't look so good here, honestly
             //float fresnel = pow(max(0., dot(nor, rd)), 5.);
             //rd = mix(rd, rv, 1.0-step(fresnel, hash()));
             
+            // new origin position, offset away from the surface to prevent self-intersection
             ro = pos+rd*E*20.0;
         } else {
+            // no intersection, currently actually doesn't doo much of anything...
             vec3 pos = ro + tmat.x*rd;
             color += absorption * colors[4]*0.9;
             break;
@@ -238,25 +255,26 @@ vec3 render(vec3 ro, vec3 rd, vec2 uv){
 }
 
 void main(){
+    // fill global color values
 	colors[0] = 1.25*vec3(0.75,0.52,0.4).bgr;
     colors[1] = 1.25*vec3(0.75,0.38,0.2).bgr;
     colors[2] = vec3(0.6,0.32,0.92).bgr;
     colors[3] = vec3(0.42,0.66,0.95).bgr;
     colors[4] = normalize(vec3(3.0,1.0,0.5)).bgr;
     colors[5] = vec3(1.0, 0.1 ,0.04).bgr;
-        
+    fc = gl_FragCoord.xy;
+    seed = float(((iFrame*73856093)^int(gl_FragCoord.x)*19349663^int(gl_FragCoord.y)*83492791)%38069);
+
     const float aspect = resolution.x/resolution.y;
     vec2 uv = gl_FragCoord.xy / resolution.xy;
     vec3 ro = vec3(.6,.1,.7)*20.0;
     
-    fc = gl_FragCoord.xy;
-    
     vec3 col = vec3(0.0);
+    // we only do one sample in this version, the loop is redundant
     ///const int samples = 1;
-    
-    seed = float(((iFrame*73856093)^int(gl_FragCoord.x)*19349663^int(gl_FragCoord.y)*83492791)%38069);
     //for(int s = 0; s < samples; s++){
-        
+
+        // calculate camera/view orientation
         vec3 ww = normalize(vec3(0.76,0.38,0.1)-ro);
 		vec3 uu = normalize(cross(normalize(vec3(0,1,0)),ww));
 		vec3 vv = normalize(cross(ww,uu));
@@ -264,16 +282,24 @@ void main(){
         //vec2 rand = R2_seq(iFrame, 1.0, -10.0);
         vec2 rand = hash2(0.0);
         
+        // anti aliasing samples
         vec2 p = -1.0 + 2.0 * (uv + 0.667*(-1.0+2.0*hash2(3531.412))/resolution.xy);
         p.x *= aspect;
         
+        // lens samples...
         vec2 lens_sample = vec2(cos(rand.x*pi2),sin(rand.x*pi2))*pow(rand.y, 0.32);
-        //vec2 lens_sample = mix(vec2(cos(rand.x*pi2),sin(rand.x*pi2))*pow(rand.y,0.01),
-        //                       vec2(cos(rand.x*pi2),sin(rand.x*pi2))*sqrt(rand.y),
-        //                       0.75);
+        // anamorphic stretch
         lens_sample *= vec2(0.75, 1.333);
-        vec3 lens_pos = ro + (lens_sample.x*uu + lens_sample.y*vv) * 0.1;
-        vec3 vr = normalize(ro+(p.x*uu + p.y*vv + 40.0*ww)*0.45-lens_pos);
-        gl_FragColor.rgb = min(render(lens_pos+17.3*vr, vr,p), 15.0);
+        // re-calculate view vectors based on the lens samples
+        const float depth_of_field = 0.1;
+        const float fov_length = 40.0;
+        const float focus_distance = 0.45;
+        vec3 lens_pos = ro + (lens_sample.x*uu + lens_sample.y*vv) * depth_of_field;
+        vec3 vr = normalize(ro+(p.x*uu + p.y*vv + fov_length*ww) * focus_distance-lens_pos);
+
+        // render/sample the scene
+        // offset the origin with a magic number (a "near plane")
+        // the result is clamped a bit to make it visually more pleasant
+        gl_FragColor.rgb = min(render(lens_pos+17.3*vr, vr), 15.0);
     //}
 }
