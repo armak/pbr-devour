@@ -27,7 +27,7 @@ const char* post =
  "vec3 e(vec2 z)"
  "{"
    "vec3 i=t(v,z/d.xy)/float(g);"
-   "vec2 e=z/d.xy,y=(e-.5)*(d.x/d.y)*2;"
+   "vec2 y=(z/d.xy-.5)*(d.x/d.y)*2;"
    "i.xyz*=1/pow(.09*dot(y,y)+1,2);"
    "i.xyz=t(i.xyz);"
    "i.xyz=smoothstep(vec3(0),vec3(1),i.xyz);"

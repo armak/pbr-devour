@@ -46,9 +46,8 @@ vec3 source(vec2 coord){
     vec3 fc = ca(imageTexture, coord/resolution.xy)/float(iFrame);
     
     // vignette
-	vec2 uv = coord / resolution.xy;
-    vec2 coord = (uv - 0.5) * (resolution.x/resolution.y) * 2.0;
-	fc.rgb *= 1.0 / pow(0.09 * dot(coord, coord) + 1.0, 2.0);
+    vec2 uv = (coord / resolution.xy - 0.5) * (resolution.x/resolution.y) * 2.0;
+	fc.rgb *= 1.0 / pow(0.09 * dot(uv, uv) + 1.0, 2.0);
 
     fc.rgb = tonemap(fc.rgb);
     fc.rgb = smoothstep(vec3(0), vec3(1), fc.rgb);
