@@ -1,7 +1,7 @@
 // custom build and feature flags
 #ifdef DEBUG
-	#define OPENGL_DEBUG        1
-	#define FULLSCREEN          0
+	#define OPENGL_DEBUG        0
+	#define FULLSCREEN          1
 	#define DESPERATE           0
 	#define BREAK_COMPATIBILITY 0
 #else
@@ -11,24 +11,17 @@
 	#define BREAK_COMPATIBILITY 0
 #endif
 
-#define POST_PASS    1
-#define USE_MIPMAPS  1
-#define USE_AUDIO    1
-#define NO_UNIFORMS  0
+#define ACCUMULATE 0
 
 #include "definitions.h"
-#if OPENGL_DEBUG
-	#include "debug.h"
-#endif
-
 #include "glext.h"
+#include "shaders/texture.inl"
 #include "shaders/fragment.inl"
-#if POST_PASS
-	#include "shaders/post.inl"
-#endif
+#include "shaders/post.inl"
 
 #pragma data_seg(".pids")
 // static allocation saves a few bytes
+static int pidTexture;
 static int pidMain;
 static int pidPost;
 // static HDC hDC;
@@ -52,9 +45,6 @@ int __cdecl main(int argc, char* argv[])
 			HWND window = CreateWindow("static", 0, WS_POPUP | WS_VISIBLE, 0, 0, XRES, YRES, 0, 0, 0, 0);
 			HDC hDC = GetDC(window);
 		#else
-			// you can create a pseudo fullscreen window by similarly enabling the WS_MAXIMIZE flag as above
-			// in which case you can replace the resolution parameters with 0s and save a couple bytes
-			// this only works if the resolution is set to the display device's native resolution
 			HDC hDC = GetDC(CreateWindow((LPCSTR)0xC018, 0, WS_POPUP | WS_VISIBLE, 0, 0, XRES, YRES, 0, 0, 0, 0));
 		#endif
 	#endif
@@ -64,97 +54,125 @@ int __cdecl main(int argc, char* argv[])
 	wglMakeCurrent(hDC, wglCreateContext(hDC));
 	
 	// create and compile shader programs
-	pidMain = ((PFNGLCREATESHADERPROGRAMVPROC)wglGetProcAddress("glCreateShaderProgramv"))(GL_FRAGMENT_SHADER, 1, &fragment);
-	#if POST_PASS
-		pidPost = ((PFNGLCREATESHADERPROGRAMVPROC)wglGetProcAddress("glCreateShaderProgramv"))(GL_FRAGMENT_SHADER, 1, &post);
-	#endif
+	pidTexture = ((PFNGLCREATESHADERPROGRAMVPROC)wglGetProcAddress("glCreateShaderProgramv"))(GL_FRAGMENT_SHADER, 1, &texture);
+	pidMain    = ((PFNGLCREATESHADERPROGRAMVPROC)wglGetProcAddress("glCreateShaderProgramv"))(GL_FRAGMENT_SHADER, 1, &fragment);
+	pidPost    = ((PFNGLCREATESHADERPROGRAMVPROC)wglGetProcAddress("glCreateShaderProgramv"))(GL_FRAGMENT_SHADER, 1, &post);
 
-	// initialize sound
-	#ifndef EDITOR_CONTROLS
-		#if USE_AUDIO
-			CreateThread(0, 0, (LPTHREAD_START_ROUTINE)_4klang_render, lpSoundBuffer, 0, 0);
-			waveOutOpen(&hWaveOut, WAVE_MAPPER, &WaveFMT, NULL, 0, CALLBACK_NULL);
-			waveOutPrepareHeader(hWaveOut, &WaveHDR, sizeof(WaveHDR));
-			waveOutWrite(hWaveOut, &WaveHDR, sizeof(WaveHDR));
-		#endif
-	#else
-		Leviathan::Editor editor = Leviathan::Editor();
-		editor.updateShaders(&pidMain, &pidPost, true);
+#ifndef EDITOR_CONTROLS
+#else
+	Leviathan::Editor editor = Leviathan::Editor();
+	/*
+	editor.compileAndDebugShader(texture, "texture", false);
+	editor.compileAndDebugShader(fragment, "fragment", false);
+	editor.compileAndDebugShader(post, "texture", false);
+	*/
+	editor.updateShaders(&pidMain, &pidPost, true);
+#endif
 
-		// absolute path always works here
-		// relative path works only when not ran from visual studio directly
-		Leviathan::Song track(L"audio.wav");
-		track.play();
-		double position = 0.0;
-	#endif
+	// texture for roughness map
+	GLuint roughnessTexture = 0;
+	glGenTextures(1, &roughnessTexture);
+	glBindTexture(GL_TEXTURE_2D, roughnessTexture);
+	// parameters
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// render the roughness map to the texture
+	((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidTexture);
+	((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(0, 1024, 1024);
+	glRects(-1, -1, 1, 1);
+	glReadBuffer(GL_BACK);
+	glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, 1024, 1024, 0);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	
+
+	// main rendering texture (for accumulating values)
+	GLuint mainTexture = 0;
+	glGenTextures(1, &mainTexture);
+	glBindTexture(GL_TEXTURE_2D, mainTexture);
+	// parameters
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, XRES, YRES, 0, GL_RGBA, GL_FLOAT, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// framebuffer
+	GLuint framebuffer = 0;
+	((PFNGLGENFRAMEBUFFERSPROC)wglGetProcAddress("glGenFramebuffers"))(1, &framebuffer);
+	((PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer"))(GL_FRAMEBUFFER, framebuffer);
+	((PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer"))(GL_DRAW_FRAMEBUFFER, framebuffer);
+	((PFNGLFRAMEBUFFERTEXTURE2DPROC)wglGetProcAddress("glFramebufferTexture2D"))(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mainTexture, 0);
+	
+	const GLenum attachments[] = { GL_COLOR_ATTACHMENT0 };
+	((PFNGLDRAWBUFFERSPROC)wglGetProcAddress("glDrawBuffers"))(1, attachments);
+
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	// enable blending for accumulating the values over frames
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
 
 	// main loop
+	const unsigned long samples = 750;
+	unsigned long frame = 1;
+	glBindTexture(GL_TEXTURE_2D, roughnessTexture);
 	do
 	{
-		#ifdef EDITOR_CONTROLS
-			editor.beginFrame(timeGetTime());
-		#endif
+#if !(DESPERATE)
+		PeekMessage(0, 0, 0, 0, PM_REMOVE);
+#endif
 
-		#if !(DESPERATE)
-			// do minimal message handling so windows doesn't kill your application
-			// not always strictly necessary but increases compatibility and reliability a lot
-			// normally you'd pass an msg struct as the first argument but it's just an
-			// output parameter and the implementation presumably does a NULL check
-			PeekMessage(0, 0, 0, 0, PM_REMOVE);
-		#endif
-
-		// render with the primary shader
+#if ACCUMULATE
+		// present the result immediately and render iteratively
+		// not allowed in the compo, just for debugging
+		glEnable(GL_BLEND);
+		((PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer"))(GL_DRAW_FRAMEBUFFER, framebuffer);
+		const GLenum attachments[] = { GL_COLOR_ATTACHMENT0 };
+		((PFNGLDRAWBUFFERSPROC)wglGetProcAddress("glDrawBuffers"))(1, attachments);
+		glBindTexture(GL_TEXTURE_2D, roughnessTexture);
 		((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidMain);
-		#ifndef EDITOR_CONTROLS
-			// if you don't have an audio system figure some other way to pass time to your shader
-			#if USE_AUDIO
-				waveOutGetPosition(hWaveOut, &MMTime, sizeof(MMTIME));
-				// it is possible to upload your vars as vertex color attribute (gl_Color) to save one function import
-				#if NO_UNIFORMS
-					glColor3ui(MMTime.u.sample, 0, 0);
-				#else
-					// remember to divide your shader time variable with the SAMPLE_RATE (44100 with 4klang)
-					((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, MMTime.u.sample);
-				#endif
-			#endif
-		#else
-			position = track.getTime();
-			((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, (static_cast<int>(position*44100.0)));
-		#endif
+		((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, frame);
+		((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(2, XRES, YRES);
 		glRects(-1, -1, 1, 1);
 
-		// render "post process" using the opengl backbuffer
-		#if POST_PASS
-			glBindTexture(GL_TEXTURE_2D, 1);
-			#if USE_MIPMAPS
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-				glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, XRES, YRES, 0);
-				((PFNGLGENERATEMIPMAPPROC)wglGetProcAddress("glGenerateMipmap"))(GL_TEXTURE_2D);
-			#else
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-				glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, XRES, YRES, 0);
-			#endif
-			((PFNGLACTIVETEXTUREPROC)wglGetProcAddress("glActiveTexture"))(GL_TEXTURE0);
-			((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidPost);
-			((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, 0);
+		frame += 1;
+
+		glBindTexture(GL_TEXTURE_2D, mainTexture);
+		((PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer"))(GL_DRAW_FRAMEBUFFER, 0);
+		glDrawBuffer(GL_BACK);
+		((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidPost);
+		((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, frame);
+		((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(2, XRES, YRES);
+		glDisable(GL_BLEND);
+		glRects(-1, -1, 1, 1);
+#else
+		// render and accumulate N amount of samples
+		if (frame <= samples)
+		{
+			((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidMain);
+			((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, frame);
+			((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(2, XRES, YRES);
 			glRects(-1, -1, 1, 1);
-		#endif
+
+			frame += 1;
+		}
+		// after rendering the desired amount, present the result and render post processing
+		// includes averaging the samples, tonemapping and more
+		else
+		{
+			glBindTexture(GL_TEXTURE_2D, mainTexture);
+			((PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer"))(GL_DRAW_FRAMEBUFFER, 0);
+			glDrawBuffer(GL_BACK);
+			((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidPost);
+			((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, frame);
+			((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(2, XRES, YRES);
+			glDisable(GL_BLEND);
+			glRects(-1, -1, 1, 1);
+		}
+#endif
 
 		SwapBuffers(hDC);
-
-		// handle functionality of the editor
-		#ifdef EDITOR_CONTROLS
-			editor.endFrame(timeGetTime());
-			position = editor.handleEvents(&track, position);
-			editor.printFrameStatistics();
-			editor.updateShaders(&pidMain, &pidPost);
-		#endif
-
-	} while(!GetAsyncKeyState(VK_ESCAPE)
-		#if USE_AUDIO
-			&& MMTime.u.sample < MAX_SAMPLES
-		#endif
-	);
+	}
+	while(!GetAsyncKeyState(VK_ESCAPE));
 
 	ExitProcess(0);
 }

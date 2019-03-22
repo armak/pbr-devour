@@ -31,6 +31,12 @@
     <None Include="src\shaders\post.frag">
       <Filter>shaders</Filter>
     </None>
+    <None Include="src\shaders\texture.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="src\shaders\texture.inl">
+      <Filter>shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="ext">
