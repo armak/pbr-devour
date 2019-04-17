@@ -75,20 +75,24 @@ vec4 map(vec3 p){
     // need to flip this because ???
     p = -p;
     float k = 1.;
-    float e = 0.0;
+    //float e = 0.0;
     for(int i = 0; i < fr_it; ++i){
         vec3 ss = vec3(-.54,0.84,1.22);
         p = 2.0*clamp(p,-ss,ss)-p;
         float f = max(scale/dot(p,p),maxi);
         p *= f;
         k *= f*1.05;
-        e = f;
+        //e = f;
     }
     
+    //p += 0.025*(-0.5+0.5*texture(roughnessTexture, 0.3*p.xz).b)*step(0.01,po.y)*smoothstep(0.02,0.4,0.4-distance(po*vec3(1,2,1), vec3(0.4,0.7,0.3)));
     vec4 res = vec4(max(length(p.xz)-.9,length(p.xz)*abs(p.y)/length(p))/k, 3.0, 0.0, 1.0);
-    
+
+    //vec4 slurm = vec4(length(p.xy)-0.25/k, 2.0, 0, 0);
+    //res = mmin(res, slurm);
+
     // flip back because ???
-    p = -p;
+    p = -p;    
 
     // crumbly
     res.x += (-1.0+2.0*hash13( floor(p*10.0) ))*0.005 * (1.0-step(0.01, po.y));
@@ -108,7 +112,19 @@ vec4 map(vec3 p){
     float blast = pow(smoothstep(-1.6, 0.35,po.x)-smoothstep(0.4,0.48,po.x), 3.0);
     res = mmin(res, vec4(length( (tpo).yz )-0.02*blast, 2, mix(0.0,25.0, pow(blast,2.0)), 0));
     
+    // slurm
+    /*
+    tpo = po-vec3(0,0.4,0.1);
+    float an2 = p.y*2.2;
+    tpo.xy *= mat2(cos(an2), sin(an2), -sin(an2), cos(an2));
+    float blas2 = pow(smoothstep(-1.6, 0.35,po.x)-smoothstep(0.4,1.0,po.x), 3.0);
+    vec4 fume = vec4(length( (tpo).xz )-0.12*blas2, 2, .0, 0);
+    fume = mmax(fume, vec4( -(length(po-vec3(0.55,0.18,0.0))-0.25), 0,0,0));
+    res = mmin(res, vec4(0.03,1,1,1)*fume);
+    */
+
     // ground plane
+    //res = mmin(res, vec4( po.y+0.015 - 0.01*( max( step(0.92, mod(p.x*8.0, 1.0)), step(0.92, mod(p.z*8.0, 1.0)) ) ) , 0, 0, 0 ));
     res = mmin(res, vec4( po.y+0.015, 0, 0, 0 ));
 
     // bounding box
@@ -127,13 +143,13 @@ vec4 intersect(vec3 ro, vec3 rd){
     float t = 0.0;
     vec4 res = vec4(-1.0);
 	vec4 h = vec4(1.0);
-    for(int i = 0; i < 200; i++){
+    for(int i = 0; i < 125; i++){
         // dynamic epsilon, aka intersection exit-condition
         float eps = E + E*5.0*pow(float(i)/200.0,2.0);
 		if(h.x < eps || t > 15.0)
             break;
         h = map(ro + rd*t);
-        res = vec4(t,h.yzw);
+        res = vec4(t, h.yzw);
         t += h.x;
     }
 	
@@ -218,7 +234,12 @@ vec3 render(vec3 ro, vec3 rd){
             // incoming light value
             vec3 incoming = colors[int(tmat.y)];
             // modulate surface color (metal parts) with the roughmess map a bit
-            incoming *= 1.0+0.09*(1.0-2.0*rough_map)*step(1.0, tmat.w);
+            incoming *= 1.0+0.1*(1.0-2.0*rough_map)*step(1.0, tmat.w);
+
+            vec2 tval = max(texture(roughnessTexture, pos.zx*0.61).br, texture(roughnessTexture, pos.xz*0.75).rb);
+            tval = mix(tval, pow(texture(roughnessTexture, pos.zx*-3.43).rb, vec2(2))*0.5, 0.25);
+            incoming = mix(incoming*vec3(0,0.5,1)*0.2, incoming, mix(0.75+0.5*length(tval), 1.0, step(-0.001, pos.y)));
+
             // emissive materials
             vec3 emission = tmat.z*incoming;
             
@@ -229,8 +250,9 @@ vec3 render(vec3 ro, vec3 rd){
             
             // calculate the brdf with magic formulas
             vec3 rv = reflect(rd, nor);
-            float rough1 = 0.01+0.3*texture(roughnessTexture, mod(pos.xz*0.7,1.0)).r;
-            rough1 = mix(rough1, 0.4, smoothstep(7.0,9.0,distance(ro,pos)));
+            
+            float rough1 = 0.3-0.3*pow(min(tval.x, tval.y), 0.1);
+            //rough1 = 0.55*mix(rough1, 0.22, smoothstep(7.0,9.0,distance(ro,pos)));
             
             float rough2 = mix(0.04, 0.02+0.04*pow(1.0-rough_map,2.0), step(0.01,pos.y));
             
@@ -291,8 +313,9 @@ void main(){
         // anamorphic stretch
         lens_sample *= vec2(0.75, 1.333);
         // re-calculate view vectors based on the lens samples
-        const float depth_of_field = 0.1;
-        const float fov_length = 40.0;
+        float ffac = pow( smoothstep(0.1, 1.99, length(p)), 4.0);
+        const float depth_of_field = 0.1+0.035*ffac;
+        const float fov_length = 40.4-0.8*ffac;
         const float focus_distance = 0.45;
         vec3 lens_pos = ro + (lens_sample.x*uu + lens_sample.y*vv) * depth_of_field;
         vec3 vr = normalize(ro+(p.x*uu + p.y*vv + fov_length*ww) * focus_distance-lens_pos);

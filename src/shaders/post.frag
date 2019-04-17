@@ -13,7 +13,7 @@ vec3 tonemap(vec3 color){
 	float E = 0.01;
 	float F = 0.30;
 	float W = 90.0;
-	float exposure = 4.0;
+	float exposure = 4.5;
 	color *= exposure;
 	color = ((color * (A * color + C * B) + D * E) / (color * (A * color + B) + D * F)) - E / F;
 	float white = ((W * (A * W + C * B) + D * E) / (W * (A * W + B) + D * F)) - E / F;
@@ -22,7 +22,7 @@ vec3 tonemap(vec3 color){
 	return color;
 }
 
-const int N = 13;
+const int N = 8;
 vec3 ca(sampler2D t, vec2 UV){
 	vec2 uv = 1.0 - 2.0 * UV;
 	vec3 c = vec3(0);
@@ -34,9 +34,9 @@ vec3 ca(sampler2D t, vec2 UV){
 		c.r += f*texture(t, 0.5-0.5*(uv*rf) ).r;
 		c.g += f*texture(t, 0.5-0.5*(uv*gf) ).g;
 		c.b += f*texture(t, 0.5-0.5*(uv*bf) ).b;
-		rf *= 0.99972;
-		gf *= 0.9998;
-        bf *= 0.99988;
+		bf *= 0.9995;
+		gf *= 0.9997;
+        rf *= 0.99988;
 	}
 	return c;
 }
@@ -67,6 +67,6 @@ void main(){
     c += -1.0*source(gl_FragCoord.xy + vec2( 1, 0));
     c += -1.0*source(gl_FragCoord.xy + vec2( 0, 1));
     
-    c = mix(center, c, 0.1);
-    gl_FragColor.rgb = pow(c, vec3(1.0 / gamma));
+    c = mix(center, c, 0.12);
+    gl_FragColor.rgb = pow( pow(c, vec3(1.005, 1.0, 0.99)), vec3(1.0 / gamma));
 }

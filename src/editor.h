@@ -22,10 +22,10 @@ namespace Leviathan
 
 		void updateShaders(int* mainShaderPID, int* postShaderPID, bool force_update = false);
 
+		bool compileAndDebugShader(const char* shader, const char* filename, bool kill_on_failure = true);
 	private:
 		int reloadShaderSource(const char* filename);
 
-		bool compileAndDebugShader(const char* shader, const char* filename, bool kill_on_failure = true);
 
 		enum PlayState {Playing, Paused};
 		PlayState state;

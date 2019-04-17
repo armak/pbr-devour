@@ -1,7 +1,7 @@
 // custom build and feature flags
 #ifdef DEBUG
 	#define OPENGL_DEBUG        0
-	#define FULLSCREEN          1
+	#define FULLSCREEN          0
 	#define DESPERATE           0
 	#define BREAK_COMPATIBILITY 0
 #else
@@ -18,6 +18,8 @@
 #include "shaders/texture.inl"
 #include "shaders/fragment.inl"
 #include "shaders/post.inl"
+
+#include "timeapi.h"
 
 #pragma data_seg(".pids")
 // static allocation saves a few bytes
@@ -61,11 +63,11 @@ int __cdecl main(int argc, char* argv[])
 #ifndef EDITOR_CONTROLS
 #else
 	Leviathan::Editor editor = Leviathan::Editor();
-	/*
+	
 	editor.compileAndDebugShader(texture, "texture", false);
 	editor.compileAndDebugShader(fragment, "fragment", false);
 	editor.compileAndDebugShader(post, "texture", false);
-	*/
+	
 	editor.updateShaders(&pidMain, &pidPost, true);
 #endif
 
@@ -76,12 +78,14 @@ int __cdecl main(int argc, char* argv[])
 	// parameters
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	// render the roughness map to the texture
 	((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidTexture);
-	((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(0, 1024, 1024);
+	((PFNGLUNIFORM2FPROC)wglGetProcAddress("glUniform2f"))(0, XRES, YRES);
 	glRects(-1, -1, 1, 1);
 	glReadBuffer(GL_BACK);
-	glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, 1024, 1024, 0);
+	glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, YRES, YRES, 0);
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 	
@@ -115,6 +119,10 @@ int __cdecl main(int argc, char* argv[])
 	const unsigned long samples = 750;
 	unsigned long frame = 1;
 	glBindTexture(GL_TEXTURE_2D, roughnessTexture);
+
+	const int t = timeGetTime();
+	bool done = false;
+
 	do
 	{
 #if !(DESPERATE)
@@ -146,7 +154,7 @@ int __cdecl main(int argc, char* argv[])
 		glRects(-1, -1, 1, 1);
 #else
 		// render and accumulate N amount of samples
-		if (frame <= samples)
+		if (timeGetTime()-t < 30*1000)
 		{
 			((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidMain);
 			((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, frame);
@@ -159,6 +167,13 @@ int __cdecl main(int argc, char* argv[])
 		// includes averaging the samples, tonemapping and more
 		else
 		{
+			/*
+			if (!done) {
+				printf("Samples: %d\n", frame);
+				done = true;
+			}
+			*/
+
 			glBindTexture(GL_TEXTURE_2D, mainTexture);
 			((PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer"))(GL_DRAW_FRAMEBUFFER, 0);
 			glDrawBuffer(GL_BACK);
