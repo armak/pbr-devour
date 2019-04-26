@@ -12,3 +12,4 @@ Acknowledgements:
 - compressed with Crinkler 2.1a by Blueberry and Mentor of Loonies (http://www.crinkler.net/)
 - shader minified (slightly) with Shader Minifier by LLB (https://github.com/laurentlb/Shader_Minifier)
 - thanks to Fizzer for all sorts of help along the way 💛
+- greetings to everyone who participated in the amazing compo!
