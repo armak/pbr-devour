@@ -153,8 +153,10 @@ int __cdecl main(int argc, char* argv[])
 		glDisable(GL_BLEND);
 		glRects(-1, -1, 1, 1);
 #else
+		// time based accumulation
+		//if (timeGetTime()-t < 30*1000)
 		// render and accumulate N amount of samples
-		if (timeGetTime()-t < 30*1000)
+		if (frame < samples)
 		{
 			((PFNGLUSEPROGRAMPROC)wglGetProcAddress("glUseProgram"))(pidMain);
 			((PFNGLUNIFORM1IPROC)wglGetProcAddress("glUniform1i"))(0, frame);
